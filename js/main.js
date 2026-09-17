@@ -25,9 +25,6 @@ const els = {
   overlayTitle: document.querySelector("#result-title"),
   overlayText: document.querySelector("#result-text"),
   dragLayer: document.querySelector("#drag-layer"),
-  lobby: document.querySelector("#lobby"),
-  lobbyTitle: document.querySelector("#lobby-title"),
-  lobbyText: document.querySelector("#lobby-text"),
   invite: document.querySelector("#invite"),
   inviteText: document.querySelector("#invite-text"),
   copyLink: document.querySelector("#copy-link"),
@@ -80,7 +77,6 @@ function isOver() {
 }
 
 function isPlayerTurn() {
-  if (net?.role === "guest" && !isPvp()) return false;
   return !isOver() && state.game.turn() === state.playerColor && !state.thinking && !state.animating;
 }
 
@@ -321,9 +317,7 @@ function resultText() {
 }
 
 function renderLobby() {
-  const guestWaiting = net?.role === "guest" && !isPvp() && !isOver();
-  if (els.lobby) els.lobby.hidden = !guestWaiting;
-  if (els.invite) els.invite.hidden = net?.role === "guest";
+  if (els.invite) els.invite.hidden = false;
   if (els.inviteText) {
     els.inviteText.textContent = isPvp()
       ? "Друг в игре"
@@ -589,7 +583,7 @@ function resetBoard() {
   state.animating = null;
   els.dragLayer.replaceChildren();
   render();
-  if (!isPvp() && net?.role !== "guest" && state.game.turn() !== state.playerColor) {
+  if (!isPvp() && state.game.turn() !== state.playerColor) {
     computerMove();
   }
 }
@@ -740,7 +734,7 @@ els.copyLink.addEventListener("click", async () => {
 
 net = startPvp({
   onStatus(text) {
-    if (els.lobbyText) els.lobbyText.textContent = text;
+    if (els.inviteText && !isPvp()) els.inviteText.textContent = text;
   },
   onReady(color) {
     state.requestId += 1;
@@ -770,17 +764,10 @@ net = startPvp({
   },
   onPeerLeft() {
     state.ready = false;
-    if (els.lobbyText) els.lobbyText.textContent = "Друг отключился. Подождите или откройте ссылку ещё раз.";
+    state.playerColor = "w";
     render();
-    if (net?.role !== "guest" && !isOver() && state.game.turn() !== state.playerColor) {
-      computerMove();
-    }
+    if (!isOver() && state.game.turn() !== state.playerColor) computerMove();
   },
 });
-
-if (net?.role === "guest") {
-  state.playerColor = "b";
-  if (els.invite) els.invite.hidden = true;
-}
 
 render();

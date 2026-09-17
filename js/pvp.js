@@ -83,7 +83,7 @@ export function startPvp(handlers) {
     },
   };
 
-  handlers.onStatus(role === "host" ? "Скопируйте ссылку и отправьте другу" : "Подключение к другу…");
+  handlers.onStatus("Пока друг не зашёл — можно играть с компьютером");
 
   (async () => {
     let joinRoom;
