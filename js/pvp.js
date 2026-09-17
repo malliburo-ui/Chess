@@ -1,5 +1,5 @@
 const SESSION_KEY = "chess-pvp-role";
-const PEER_PREFIX = "kldscpchess-";
+const APP_ID = "kldscp-chess";
 
 function makeRoom() {
   const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -8,13 +8,10 @@ function makeRoom() {
   return id;
 }
 
-function peerId(room) {
-  return PEER_PREFIX + room;
-}
-
 function roomUrl(room) {
   const url = new URL(location.href);
   url.searchParams.set("room", room);
+  url.searchParams.delete("v");
   return url.href;
 }
 
@@ -34,112 +31,136 @@ function saveSession(role, room) {
   sessionStorage.setItem(SESSION_KEY, JSON.stringify({ role, room }));
 }
 
+function bindAction(action, onData) {
+  if (Array.isArray(action)) {
+    const [send, receive] = action;
+    receive(onData);
+    return send;
+  }
+  action.onMessage = (data) => onData(data);
+  return (data) => action.send(data);
+}
+
+async function loadJoinRoom() {
+  try {
+    const mod = await import("https://esm.run/trystero");
+    if (mod.joinRoom) return mod.joinRoom;
+  } catch {
+    /* try next */
+  }
+  const mod = await import("https://esm.sh/trystero");
+  return mod.joinRoom;
+}
+
 export function startPvp(handlers) {
   const params = new URLSearchParams(location.search);
   const urlRoom = params.get("room");
   const session = loadSession();
 
-  let room = urlRoom;
+  let roomId = urlRoom;
   let role = "guest";
-  if (!room) {
-    room = makeRoom();
+  if (!roomId) {
+    roomId = makeRoom();
     role = "host";
-    setRoomInUrl(room);
-    saveSession(role, room);
-  } else if (session && session.room === room && session.role === "host") {
+    setRoomInUrl(roomId);
+    saveSession(role, roomId);
+  } else if (session && session.room === roomId && session.role === "host") {
     role = "host";
   } else {
     role = "guest";
-    setRoomInUrl(room);
-    saveSession(role, room);
+    setRoomInUrl(roomId);
+    saveSession(role, roomId);
   }
 
   const net = {
-    room,
+    room: roomId,
     role,
-    url: roomUrl(room),
+    url: roomUrl(roomId),
     ready: false,
-    conn: null,
-    peer: null,
+    opponent: null,
     send(payload) {
-      if (net.conn && net.conn.open) net.conn.send(payload);
+      net._send?.(payload);
     },
   };
 
-  const Peer = window.Peer;
-  if (!Peer) {
-    handlers.onStatus("Не удалось загрузить сеть. Обновите страницу.");
-    return net;
-  }
+  handlers.onStatus(role === "host" ? "Скопируйте ссылку и отправьте другу" : "Подключение к другу…");
 
-  const bind = (conn) => {
-    net.conn = conn;
-    conn.on("data", (data) => {
-      if (!data || typeof data !== "object") return;
-      if (data.type === "hello") handlers.onHello(data);
-      if (data.type === "move") handlers.onMove(data);
-      if (data.type === "reset") handlers.onReset();
-    });
-    conn.on("close", () => {
-      net.ready = false;
-      handlers.onPeerLeft();
-    });
-    conn.on("error", () => {
-      net.ready = false;
-      handlers.onPeerLeft();
-    });
-  };
-
-  const markReady = () => {
-    if (net.ready) return;
-    net.ready = true;
-    handlers.onReady(net.role === "host" ? "w" : "b");
-  };
-
-  if (role === "host") {
-    net.peer = new Peer(peerId(room));
-    net.peer.on("open", () => handlers.onStatus("Скопируйте ссылку и отправьте другу"));
-    net.peer.on("connection", (conn) => {
-      if (net.conn && net.conn.open) {
-        conn.close();
-        return;
-      }
-      bind(conn);
-      conn.on("open", () => {
-        markReady();
-        conn.send({ type: "hello" });
-      });
-    });
-    net.peer.on("error", (error) => {
-      handlers.onStatus(error?.type === "unavailable-id" ? "Комната занята, обновите страницу" : "Ошибка связи, обновите страницу");
-    });
-    return net;
-  }
-
-  net.peer = new Peer();
-  const connect = () => {
-    if (net.ready) return;
-    const conn = net.peer.connect(peerId(room), { reliable: true });
-    bind(conn);
-    conn.on("open", markReady);
-  };
-  net.peer.on("open", () => {
-    connect();
-    const timer = window.setInterval(() => {
-      if (net.ready) {
-        window.clearInterval(timer);
-        return;
-      }
-      connect();
-    }, 1500);
-  });
-  net.peer.on("error", (error) => {
-    if (error?.type === "peer-unavailable") {
-      window.setTimeout(connect, 1200);
+  (async () => {
+    let joinRoom;
+    try {
+      joinRoom = await loadJoinRoom();
+    } catch {
+      handlers.onStatus("Не удалось подключить сеть. Обновите страницу.");
       return;
     }
-    handlers.onStatus("Не удалось подключиться. Проверьте ссылку.");
-  });
-  handlers.onStatus("Подключение к другу…");
+
+    const room = joinRoom(
+      {
+        appId: APP_ID,
+        rtcConfig: {
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun.cloudflare.com:3478" },
+            { urls: "stun:stun.relay.metered.ca:80" },
+            {
+              urls: [
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:443",
+                "turn:openrelay.metered.ca:443?transport=tcp",
+              ],
+              username: "openrelayproject",
+              credential: "openrelayproject",
+            },
+          ],
+        },
+      },
+      `chess-${roomId}`,
+    );
+
+    net._send = bindAction(room.makeAction("move"), (data) => {
+      if (data?.type === "move") handlers.onMove(data);
+      else if (data?.type === "reset") handlers.onReset();
+      else if (data?.type === "sync") handlers.onSync?.(data);
+    });
+
+    let leaveTimer = 0;
+    const markReady = (peerId) => {
+      window.clearTimeout(leaveTimer);
+      net.opponent = peerId;
+      if (!net.ready) {
+        net.ready = true;
+        handlers.onReady(role === "host" ? "w" : "b");
+      }
+      if (role === "host") {
+        const snap = handlers.getSnapshot?.();
+        if (snap) net.send({ type: "sync", ...snap });
+      }
+    };
+
+    const listen = (event, fn) => {
+      const current = room[event];
+      if (typeof current === "function") {
+        try {
+          current.call(room, fn);
+          return;
+        } catch {
+          /* new API uses assignment */
+        }
+      }
+      room[event] = fn;
+    };
+
+    listen("onPeerJoin", (peerId) => markReady(peerId));
+    listen("onPeerLeave", (peerId) => {
+      if (peerId !== net.opponent) return;
+      leaveTimer = window.setTimeout(() => {
+        if (net.opponent !== peerId) return;
+        net.ready = false;
+        net.opponent = null;
+        handlers.onPeerLeft();
+      }, 2500);
+    });
+  })();
+
   return net;
 }

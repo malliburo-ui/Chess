@@ -653,9 +653,15 @@ net = startPvp({
     state.playerColor = color;
     render();
   },
-  onHello() {
-    state.ready = true;
-    state.playerColor = net.role === "host" ? "w" : "b";
+  getSnapshot() {
+    return { fen: state.game.fen(), lastMove: state.lastMove };
+  },
+  onSync(payload) {
+    if (!payload?.fen || net?.role === "host") return;
+    state.game.load(payload.fen);
+    state.lastMove = payload.lastMove || null;
+    state.selected = null;
+    state.legal = [];
     render();
   },
   onMove(payload) {
@@ -666,7 +672,7 @@ net = startPvp({
   },
   onPeerLeft() {
     state.ready = false;
-    if (els.lobbyText) els.lobbyText.textContent = "Друг отключился. Отправьте ссылку ещё раз.";
+    if (els.lobbyText) els.lobbyText.textContent = "Друг отключился. Подождите или откройте ссылку ещё раз.";
     renderLobby();
   },
 });
