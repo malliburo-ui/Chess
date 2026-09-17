@@ -20,13 +20,35 @@ html, body {
 
 .page {
   height: 100dvh;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   padding: var(--pad);
 }
 
+.invite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 14px;
+  width: min(calc(100vw - 2 * var(--pad)), calc(100dvh - 72px - 2 * var(--pad)));
+}
+
+.invite[hidden] { display: none; }
+
+.invite p {
+  margin: 0;
+  color: var(--blue);
+  opacity: 0.85;
+  font-size: 15px;
+  text-align: center;
+}
+
 .board-frame {
-  width: min(calc(100vw - 2 * var(--pad)), calc(100dvh - 2 * var(--pad)));
+  width: min(calc(100vw - 2 * var(--pad)), calc(100dvh - 72px - 2 * var(--pad)));
   aspect-ratio: 1 / 1;
   height: auto;
   background: var(--blue);

@@ -1,6 +1,9 @@
 import { Chess, squareName } from "./game.js";
 import { pieceSvg } from "./pieces.js";
+import { chooseMove } from "./ai.js";
 import { startPvp } from "./pvp.js";
+
+const LEVEL = { depth: 3, randomness: 0.08 };
 
 const state = {
   game: new Chess(),
@@ -25,6 +28,8 @@ const els = {
   lobby: document.querySelector("#lobby"),
   lobbyTitle: document.querySelector("#lobby-title"),
   lobbyText: document.querySelector("#lobby-text"),
+  invite: document.querySelector("#invite"),
+  inviteText: document.querySelector("#invite-text"),
   copyLink: document.querySelector("#copy-link"),
 };
 
@@ -59,19 +64,24 @@ const drag = {
 };
 
 let net = null;
+let worker = null;
+try {
+  worker = new Worker(new URL("./engine.worker.js", import.meta.url), { type: "module" });
+} catch {
+  worker = null;
+}
+
+function isPvp() {
+  return Boolean(net?.ready);
+}
 
 function isOver() {
   return state.game.isGameOver();
 }
 
 function isPlayerTurn() {
-  return (
-    state.ready &&
-    !isOver() &&
-    state.game.turn() === state.playerColor &&
-    !state.thinking &&
-    !state.animating
-  );
+  if (net?.role === "guest" && !isPvp()) return false;
+  return !isOver() && state.game.turn() === state.playerColor && !state.thinking && !state.animating;
 }
 
 function squareFromEvent(event) {
@@ -299,7 +309,11 @@ function renderPromotion() {
 
 function resultText() {
   if (state.game.isCheckmate()) {
-    return state.game.winner() === state.playerColor ? "Мат. Вы победили" : "Мат. Соперник победил";
+    return state.game.winner() === state.playerColor
+      ? "Мат. Вы победили"
+      : isPvp()
+        ? "Мат. Соперник победил"
+        : "Мат. Компьютер победил";
   }
   if (state.game.isStalemate()) return "Пат — ничья";
   if (state.game.isDraw()) return "Ничья";
@@ -307,15 +321,14 @@ function resultText() {
 }
 
 function renderLobby() {
-  if (!els.lobby) return;
-  if (state.ready || isOver()) {
-    els.lobby.hidden = true;
-    return;
+  const guestWaiting = net?.role === "guest" && !isPvp() && !isOver();
+  if (els.lobby) els.lobby.hidden = !guestWaiting;
+  if (els.invite) els.invite.hidden = net?.role === "guest";
+  if (els.inviteText) {
+    els.inviteText.textContent = isPvp()
+      ? "Друг в игре"
+      : "Пока друг не зашёл — можно играть с компьютером";
   }
-  els.lobby.hidden = false;
-  const host = net?.role === "host";
-  els.lobbyTitle.textContent = host ? "Пригласите друга" : "Подключение";
-  els.copyLink.hidden = !host;
 }
 
 function renderStatus() {
@@ -372,16 +385,20 @@ function finishMove(from, to, promotion) {
   state.lastMove = { from, to };
   playSound(Boolean(played.captured));
   render();
-  net?.send({
-    type: "move",
-    fen: state.game.fen(),
-    from,
-    to,
-    moving,
-    captured: Boolean(played.captured),
-    flags: played.flags,
-    rook: castleRookSquares(played),
-  });
+  if (isPvp()) {
+    net.send({
+      type: "move",
+      fen: state.game.fen(),
+      from,
+      to,
+      moving,
+      captured: Boolean(played.captured),
+      flags: played.flags,
+      rook: castleRookSquares(played),
+    });
+    return;
+  }
+  if (!isOver()) window.setTimeout(computerMove, 120);
 }
 
 function castleRookSquares(played) {
@@ -448,6 +465,80 @@ function flyPiece({ from, to, html }) {
   });
 }
 
+function computerMove() {
+  if (isPvp() || state.game.turn() === state.playerColor || isOver()) return;
+  state.thinking = true;
+  const payload = {
+    id: ++state.requestId,
+    fen: state.game.fen(),
+    depth: LEVEL.depth,
+    randomness: LEVEL.randomness,
+  };
+
+  const apply = (move) => {
+    if (payload.id !== state.requestId || isOver() || isPvp()) {
+      state.thinking = false;
+      render();
+      return;
+    }
+    if (!move) {
+      state.thinking = false;
+      render();
+      return;
+    }
+    const moving = state.game.get(move.from);
+    const played = state.game.move(move);
+    if (!played || !moving) {
+      state.thinking = false;
+      render();
+      return;
+    }
+    const rook = castleRookSquares(played);
+    state.game.morphMoved(played.to);
+    state.lastMove = { from: played.from, to: played.to };
+    state.animating = { hide: rook ? [played.to, rook.to] : [played.to] };
+    render();
+
+    const flights = [
+      flyPiece({
+        from: played.from,
+        to: played.to,
+        html: pieceSvg(moving.color, moving.type),
+      }),
+    ];
+    if (rook) {
+      flights.push(
+        flyPiece({
+          from: rook.from,
+          to: rook.to,
+          html: pieceSvg(played.color, "r"),
+        }),
+      );
+    }
+
+    Promise.all(flights).then(() => {
+      if (payload.id !== state.requestId) return;
+      playSound(Boolean(played.captured));
+      state.animating = null;
+      state.thinking = false;
+      render();
+    });
+  };
+
+  if (worker) {
+    const onMessage = (event) => {
+      if (event.data.id !== payload.id) return;
+      worker.removeEventListener("message", onMessage);
+      apply(event.data.move);
+    };
+    worker.addEventListener("message", onMessage);
+    worker.postMessage(payload);
+    return;
+  }
+
+  window.setTimeout(() => apply(chooseMove(payload.fen, payload)), 20);
+}
+
 function applyRemoteMove(payload) {
   if (!payload?.fen || !payload.from || !payload.to) return;
   state.requestId += 1;
@@ -498,6 +589,9 @@ function resetBoard() {
   state.animating = null;
   els.dragLayer.replaceChildren();
   render();
+  if (!isPvp() && net?.role !== "guest" && state.game.turn() !== state.playerColor) {
+    computerMove();
+  }
 }
 
 function newGame() {
@@ -649,6 +743,10 @@ net = startPvp({
     if (els.lobbyText) els.lobbyText.textContent = text;
   },
   onReady(color) {
+    state.requestId += 1;
+    state.thinking = false;
+    state.animating = null;
+    els.dragLayer.replaceChildren();
     state.ready = true;
     state.playerColor = color;
     render();
@@ -673,13 +771,16 @@ net = startPvp({
   onPeerLeft() {
     state.ready = false;
     if (els.lobbyText) els.lobbyText.textContent = "Друг отключился. Подождите или откройте ссылку ещё раз.";
-    renderLobby();
+    render();
+    if (net?.role !== "guest" && !isOver() && state.game.turn() !== state.playerColor) {
+      computerMove();
+    }
   },
 });
 
 if (net?.role === "guest") {
   state.playerColor = "b";
-  els.copyLink.hidden = true;
+  if (els.invite) els.invite.hidden = true;
 }
 
 render();
