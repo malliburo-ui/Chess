@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Шахматы</title>
+  <meta name="description" content="Откройте ссылку и играйте в шахматы с другом.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♞</text></svg>">
+  <link rel="stylesheet" href="./styles.css?v=11">
+</head>
+<body>
+  <main class="page">
+    <div class="board-frame">
+      <div class="board-wrap">
+        <div id="board" class="board" role="grid" aria-label="Шахматная доска"></div>
+        <div id="promo-root"></div>
+        <div id="lobby" class="overlay">
+          <div>
+            <h2 id="lobby-title">Пригласите друга</h2>
+            <p id="lobby-text">Скопируйте ссылку и отправьте её</p>
+            <button class="action" id="copy-link" type="button">Копировать ссылку</button>
+          </div>
+        </div>
+        <div id="result-overlay" class="overlay" hidden>
+          <div>
+            <h2 id="result-title">Партия окончена</h2>
+            <p id="result-text"></p>
+            <button class="action primary" id="play-again" type="button">Играть снова</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <div id="drag-layer" class="drag-layer" aria-hidden="true"></div>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script type="module" src="./js/main.js?v=11"></script>
+</body>
+</html>
